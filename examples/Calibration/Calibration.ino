@@ -1,425 +1,319 @@
-#include <M5StickCPlus.h>
-#include "UNIT_MiniJoyC.h"
+// ============================================================================
+// M5Stick-C Plus MiniJoyC Calibration Program
+// ============================================================================
 
-extern const unsigned char gImage_statusLed[];
+#include "M5Unified.h"
+#include "M5HatMiniJoyC.h"
 
-#define POS_X 0
-#define POS_Y 1
+#define MiniJoyC_SDA 0 
+#define MiniJoyC_SCL 26
 
-#define SAMPLE_TIMES 100
-#define XY_CAL_TIMES 10
+#define SAMPLE_TIMES 100    // Number of samples for center calibration
+#define XY_CAL_TIMES 10     // Times to sweep all 4 edges
 
-#define X_DEFAULT_MIN 500
-#define X_DEFAULT_MAX 3600
-#define Y_DEFAULT_MIN 500
-#define Y_DEFAULT_MAX 3600
-#define MID_DEFAULT   2000
+#define X_DEFAULT_MIN 500    // Default minimum X axis value
+#define X_DEFAULT_MAX 3600  // Default maximum X axis value
+#define Y_DEFAULT_MIN 500   // Default minimum Y axis value
+#define Y_DEFAULT_MAX 3600  // Default maximum Y axis value
+#define MID_DEFAULT 2000    // Default center/middle value
 
-uint8_t flag_sd_card = 0;
-uint8_t flag_tf_test = 0;
-char tf_write_buf[20];
-char tf_read_buf[20];
+enum { 
+  CAL_CENTER = 0,     // State 0: Center calibration
+  CAL_CENTER_DONE,    // State 1: Center calibration done
+  CAL_XY_RANGE,       // State 2: XY axis range calibration
+  CAL_DONE,           // State 3: Calibration complete
+  CAL_VERIFY          // State 4: Verify calibration results
+};
+uint8_t cal_state = CAL_CENTER;  // Current calibration state
 
-uint8_t cal_state = 0;
-enum { CAL_CENTER = 0, CAL_CENTER_DONE, CAL_XY, CAL_DONE, CAL_VERIFY };
+M5HatMiniJoyC joyc;    // Joystick object
 
-TFT_eSprite tftSprite = TFT_eSprite(&M5.Lcd);
-UNIT_JOYC sensor;
-
-hw_timer_t *timer              = NULL;
-unsigned int flag_lcd_interval = 0;
-volatile uint8_t flag_1s       = 0;
-
-hw_timer_t *timer2          = NULL;
-volatile uint8_t flag_200ms = 0;
-
-void IRAM_ATTR onTimer() {
-    flag_lcd_interval++;
-    flag_200ms = 1;
+static void waitMiniJoyCReady() {
+  while (!joyc.begin(&Wire, MiniJoyC_ADDR, MiniJoyC_SDA, MiniJoyC_SCL, 100000UL)) {
+    delay(100);  // Retry every 100ms
+  }
 }
 
-void cal_center(void) {
-    while (!(sensor.begin(&Wire, JoyC_ADDR, 0, 26, 100000UL))) {
-        delay(100);
-    }
-    int16_t adc_mid_x, adc_mid_y;
-    uint16_t adc_cal_data[6];
-
-    int16_t adc_x, adc_y;
-    int16_t adc_max_x = 0;
-    int16_t adc_max_y = 0;
-    int16_t adc_min_x = 4095;
-    int16_t adc_min_y = 4095;
-    int16_t adc_x_set[SAMPLE_TIMES];
-    int16_t adc_y_set[SAMPLE_TIMES];
-    int32_t sum_x = 0;
-    int32_t sum_y = 0;
-
-    tftSprite.fillSprite(BLACK);
-    tftSprite.setTextSize(1);
-    tftSprite.setCursor(0, 0, 4);
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("CenterCal");
-    tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-    tftSprite.setCursor(0, 30, 2);
-    tftSprite.setTextSize(1);
-    tftSprite.setTextColor(WHITE);
-    for (int i = 0; i < SAMPLE_TIMES; i++) {
-        adc_x_set[i] = sensor.getADCValue(POS_X);
-        adc_y_set[i] = sensor.getADCValue(POS_Y);
-        tftSprite.printf(".");
-        tftSprite.pushSprite(0, 0);
-    }
-    for (int i = 0; i < SAMPLE_TIMES; i++) {
-        if (adc_x_set[i] < adc_min_x) {
-            adc_min_x = adc_x_set[i];
-        }
-        if (adc_x_set[i] > adc_max_x) {
-            adc_max_x = adc_x_set[i];
-        }
-        if (adc_y_set[i] < adc_min_y) {
-            adc_min_y = adc_y_set[i];
-        }
-        if (adc_y_set[i] > adc_max_y) {
-            adc_max_y = adc_y_set[i];
-        }
-    }
-    for (int i = 0; i < SAMPLE_TIMES; i++) {
-        sum_x += adc_x_set[i];
-        sum_y += adc_y_set[i];
-    }
-
-    adc_mid_x = (sum_x - adc_min_x - adc_max_x) / (SAMPLE_TIMES - 2);
-    adc_mid_y = (sum_y - adc_min_y - adc_max_y) / (SAMPLE_TIMES - 2);
-
-    sensor.setOneCalValue(4, adc_mid_x);
-    sensor.setOneCalValue(5, adc_mid_y);
-
-    tftSprite.fillSprite(BLACK);
-    tftSprite.setTextSize(1);
-    tftSprite.setCursor(0, 0, 4);
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("CenterCal");
-    tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-    tftSprite.setCursor(0, 30, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(WHITE);
-
-    tftSprite.printf("RawX:%d", sensor.getADCValue(POS_X));
-    tftSprite.setCursor(0, 60, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.printf("RawY:%d", sensor.getADCValue(POS_Y));
-    tftSprite.setTextSize(2);
-    tftSprite.drawLine(5, 92 + 10, 130, 92 + 10, ORANGE);
-    tftSprite.setTextColor(GREEN);
-    tftSprite.setCursor(0, 95 + 10, 2);
-    tftSprite.printf("CalX=%d", sensor.getCalValue(4));
-    // tftSprite.drawLine(5, 127+15, 130, 127+15, ORANGE);
-    tftSprite.setTextColor(GREEN);
-    tftSprite.setCursor(0, 130 + 15, 2);
-    tftSprite.printf("CalY=%d", sensor.getCalValue(5));
-    tftSprite.drawLine(5, 162 + 20, 130, 162 + 20, ORANGE);
-    tftSprite.setCursor(0, 165 + 20, 2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnA");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Cal XY");
-    tftSprite.setCursor(0, 190 + 20, 2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnB");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Recal");
-    tftSprite.pushSprite(0, 0);
-    cal_state = CAL_CENTER_DONE;
+static void drawHeader(const char* title) {
+  M5.Display.fillScreen(BLACK);                    // Fill black background
+  M5.Display.setCursor(0, 0);                      // Set cursor position
+  M5.Display.setTextColor(YELLOW, BLACK);          // Set text color to yellow
+  M5.Display.printf("%s", title);                  // Display title
+  M5.Display.drawLine(5, 30, 130, 30, ORANGE);    // Draw orange separator line
 }
 
-void cal_center_done(void) {
-    tftSprite.fillSprite(BLACK);
-    tftSprite.setTextSize(1);
-    tftSprite.setCursor(0, 0, 4);
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("CenterCal");
-    tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-    tftSprite.setCursor(0, 30, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(WHITE);
+// Center Point Calibration
+static void cal_center() {
+  waitMiniJoyCReady();  // Wait for joystick ready
 
-    tftSprite.printf("RawX:%d", sensor.getADCValue(POS_X));
-    tftSprite.setCursor(0, 60, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.printf("RawY:%d", sensor.getADCValue(POS_Y));
-    tftSprite.setTextSize(2);
-    tftSprite.drawLine(5, 92 + 10, 130, 92 + 10, ORANGE);
-    tftSprite.setTextColor(GREEN);
-    tftSprite.setCursor(0, 95 + 10, 2);
-    tftSprite.printf("CalX=%d", sensor.getCalValue(4));
-    // tftSprite.drawLine(5, 127+15, 130, 127+15, ORANGE);
-    tftSprite.setTextColor(GREEN);
-    tftSprite.setCursor(0, 130 + 15, 2);
-    tftSprite.printf("CalY=%d", sensor.getCalValue(5));
-    tftSprite.drawLine(5, 162 + 20, 130, 162 + 20, ORANGE);
-    tftSprite.setCursor(0, 165 + 20, 2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnA:");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("CalXY");
-    tftSprite.setCursor(0, 190 + 20, 2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnB:");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Recal");
-    tftSprite.pushSprite(0, 0);
+  // Center coordinates and extreme values
+  int16_t adc_cen_x, adc_cen_y;       // Center X, Y values
+  int16_t adc_max_x = 0, adc_max_y = 0;       // X, Y max values
+  int16_t adc_min_x = 4095, adc_min_y = 4095; // X, Y min values
+  
+  // Sample arrays
+  int16_t adc_x_set[SAMPLE_TIMES];    // X axis samples
+  int16_t adc_y_set[SAMPLE_TIMES];    // Y axis samples
+  int32_t sum_x = 0, sum_y = 0;       // X, Y sum
+
+  drawHeader("CenterCal");                        // Draw header
+  M5.Display.setCursor(0, 40);                   // Set cursor position
+  M5.Display.setTextColor(WHITE, BLACK);         // White text
+  M5.Display.printf("Sampling...");             // Display sampling message
+
+  // Collect SAMPLE_TIMES samples
+  for (int i = 0; i < SAMPLE_TIMES; i++) {
+    adc_x_set[i] = joyc.getADCValue(ADC_X);    // Read X axis ADC value
+    adc_y_set[i] = joyc.getADCValue(ADC_Y);    // Read Y axis ADC value
+    delay(5);                                    // 5ms delay
+  }
+
+  // Calculate min, max and sum
+  for (int i = 0; i < SAMPLE_TIMES; i++) {
+    adc_min_x = min(adc_min_x, adc_x_set[i]);  // Update X min
+    adc_max_x = max(adc_max_x, adc_x_set[i]);  // Update X max
+    adc_min_y = min(adc_min_y, adc_y_set[i]);  // Update Y min
+    adc_max_y = max(adc_max_y, adc_y_set[i]);  // Update Y max
+    sum_x += adc_x_set[i];                      // Accumulate X value
+    sum_y += adc_y_set[i];                      // Accumulate Y value
+  }
+
+  // Calculate center value (exclude min and max)
+  // average = (sum - min - max) / (sample_count - 2)
+  adc_cen_x = (sum_x - adc_min_x - adc_max_x) / (SAMPLE_TIMES - 2);
+  adc_cen_y = (sum_y - adc_min_y - adc_max_y) / (SAMPLE_TIMES - 2);
+
+  // Write center calibration values to joystick
+  joyc.setOneCalValue(Cal_X_cen, adc_cen_x);  // Set X center value
+  joyc.setOneCalValue(Cal_Y_cen, adc_cen_y);  // Set Y center value
+
+  // Transition to center calibration done state
+  cal_state = CAL_CENTER_DONE;
 }
 
-void cal_xy(void) {
-    while (!(sensor.begin(&Wire, JoyC_ADDR, 0, 26, 100000UL))) {
-        delay(100);
+// Display Center Calibration Results
+static void cal_center_done() {
+  drawHeader("CenterCal");  // Draw header
+
+  M5.Display.setTextColor(WHITE, BLACK); // White text
+
+  // Display real-time raw ADC values
+  M5.Display.setCursor(0, 40);
+  M5.Display.printf("RawX:%d", joyc.getADCValue(ADC_X));  // X raw value
+  M5.Display.setCursor(0, 70);
+  M5.Display.printf("RawY:%d", joyc.getADCValue(ADC_Y));  // Y raw value
+
+  M5.Display.drawLine(5, 105, 130, 105, ORANGE);  // Separator line
+
+  // Display calibrated center values
+  M5.Display.setTextColor(GREEN, BLACK);  // Green text
+  M5.Display.setCursor(0, 115);
+  M5.Display.printf("CalX:%d", joyc.getCalValue(Cal_X_cen));  // X calibrated value
+  M5.Display.setCursor(0, 145);
+  M5.Display.printf("CalY:%d", joyc.getCalValue(Cal_Y_cen));  // Y calibrated value
+
+  M5.Display.drawLine(5, 175, 130, 175, ORANGE);  // Separator line
+
+  // Display operation menu
+  M5.Display.setTextColor(WHITE, BLACK);  // White text
+  M5.Display.setCursor(0, 185);
+  M5.Display.printf("BtnA:CalXY");  // Button A: Go to XY calibration
+  M5.Display.setCursor(0, 210);
+  M5.Display.printf("BtnB:Recal");  // Button B: Recalibrate center
+}
+
+// XY Axis Range Calibration
+static void cal_xy_range() {
+  waitMiniJoyCReady();  // Wait for joystick ready
+
+  int16_t adc_min_x = joyc.getCalValue(Cal_X_min);  // X minimum
+  int16_t adc_max_x = joyc.getCalValue(Cal_X_max);  // X maximum
+  int16_t adc_min_y = joyc.getCalValue(Cal_Y_min);  // Y minimum
+  int16_t adc_max_y = joyc.getCalValue(Cal_Y_max);  // Y maximum
+  int16_t adc_cen_x = joyc.getCalValue(Cal_X_cen);  // X center
+  int16_t adc_cen_y = joyc.getCalValue(Cal_Y_cen);  // Y center
+
+  uint16_t cal_times = 0;  // Number of complete sweeps
+  uint8_t cal_flag_x_min = 0, cal_flag_x_max = 0, cal_flag_y_min = 0, cal_flag_y_max = 0;
+
+  while (true) {
+    M5.update();  // Update M5 input status
+
+    int16_t adc_x = joyc.getADCValue(ADC_X);  // X axis value
+    int16_t adc_y = joyc.getADCValue(ADC_Y);  // Y axis value
+
+    if (adc_x < adc_min_x) adc_min_x = adc_x;  // Update X min
+    if (adc_x > adc_max_x) adc_max_x = adc_x;  // Update X max
+    if (adc_y < adc_min_y) adc_min_y = adc_y;  // Update Y min
+    if (adc_y > adc_max_y) adc_max_y = adc_y;  // Update Y max
+
+    if (adc_x < X_DEFAULT_MIN) cal_flag_x_min = 1;  // Reached X minimum
+    if (adc_x > X_DEFAULT_MAX) cal_flag_x_max = 1;  // Reached X maximum
+    if (adc_y < Y_DEFAULT_MIN) cal_flag_y_min = 1;  // Reached Y minimum
+    if (adc_y > Y_DEFAULT_MAX) cal_flag_y_max = 1;  // Reached Y maximum
+
+    if (cal_flag_x_max && cal_flag_x_min && cal_flag_y_min && cal_flag_y_max) {
+      cal_times++;  // Increment completion count
+      cal_flag_x_min = cal_flag_x_max = cal_flag_y_min = cal_flag_y_max = 0;
+      if (cal_times > XY_CAL_TIMES) cal_times = XY_CAL_TIMES;
     }
-    int16_t adc_mid_x, adc_mid_y;
-    uint16_t adc_cal_data[6];
 
-    int16_t adc_x, adc_y;
-    int16_t adc_max_x = 0;
-    int16_t adc_max_y = 0;
-    int16_t adc_min_x = 4095;
-    int16_t adc_min_y = 4095;
-    int16_t adc_x_set[SAMPLE_TIMES];
-    int16_t adc_y_set[SAMPLE_TIMES];
-    int32_t sum_x          = 0;
-    int32_t sum_y          = 0;
-    uint16_t cal_times     = 0;
-    uint8_t cal_flag_x_min = 0;
-    uint8_t cal_flag_x_max = 0;
-    uint8_t cal_flag_y_min = 0;
-    uint8_t cal_flag_y_max = 0;
+    drawHeader("XYCal");                         // Draw header
+    M5.Display.setTextColor(WHITE, BLACK);       // White text
+    M5.Display.setCursor(0, 50);
+    M5.Display.printf("Remain:");               // Display "Remain"
 
-    adc_min_x = sensor.getCalValue(0);
-    adc_max_x = sensor.getCalValue(1);
-    adc_min_y = sensor.getCalValue(2);
-    adc_max_y = sensor.getCalValue(3);
-    adc_mid_x = sensor.getCalValue(4);
-    adc_mid_y = sensor.getCalValue(5);
+    M5.Display.setTextColor(GREEN, BLACK);       // Green text
+    M5.Display.setCursor(0, 80);
+    M5.Display.printf("%d", (int)(XY_CAL_TIMES - cal_times));  // Show remaining times
 
-    tftSprite.fillSprite(BLACK);
-    tftSprite.setTextSize(1);
-    tftSprite.setCursor(0, 0, 4);
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("XYCal");
-    tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-    tftSprite.setCursor(0, 30, 2);
-    tftSprite.setTextSize(1);
-    tftSprite.setTextColor(WHITE);
-    while (1) {
-        adc_x = sensor.getADCValue(POS_X);
-        adc_y = sensor.getADCValue(POS_Y);
-        if (adc_x < adc_min_x) {
-            adc_min_x = adc_x;
-        }
-        if (adc_x < X_DEFAULT_MIN) {
-            cal_flag_x_min = 1;
-        }
-        if (adc_x > adc_max_x) {
-            adc_max_x = adc_x;
-        }
-        if (adc_x > X_DEFAULT_MAX) {
-            cal_flag_x_max = 1;
-        }
-        if (adc_y < adc_min_y) {
-            adc_min_y = adc_y;
-        }
-        if (adc_y < Y_DEFAULT_MIN) {
-            cal_flag_y_min = 1;
-        }
-        if (adc_y > adc_max_y) {
-            adc_max_y = adc_y;
-        }
-        if (adc_y > Y_DEFAULT_MAX) {
-            cal_flag_y_max = 1;
-        }
-        if (cal_flag_x_max && cal_flag_x_min && cal_flag_y_min &&
-            cal_flag_y_max) {
-            cal_times++;
-            cal_flag_x_min = 0;
-            cal_flag_x_max = 0;
-            cal_flag_y_min = 0;
-            cal_flag_y_max = 0;
-        }
-        if (cal_times > XY_CAL_TIMES) cal_times = XY_CAL_TIMES;
-        if (flag_lcd_interval % 5 == 0) {
-            M5.Lcd.drawBitmap(115, 5, 20, 20,
-                              (uint16_t *)gImage_statusLed + (20 * 20 * 0));
-        } else {
-            tftSprite.fillSprite(BLACK);
-            tftSprite.setTextSize(1);
-            tftSprite.setCursor(0, 0, 4);
-            tftSprite.setTextColor(YELLOW);
-            tftSprite.printf("XYCal");
-            tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-            tftSprite.setCursor(0, 30, 2);
-            tftSprite.setTextSize(2);
-            tftSprite.setTextColor(WHITE);
-            tftSprite.printf("CalTimes:");
-            tftSprite.setCursor(0, 60, 2);
-            tftSprite.setTextSize(2);
-            tftSprite.setTextColor(GREEN);
-            tftSprite.printf("%d", XY_CAL_TIMES - cal_times);
-            tftSprite.pushSprite(0, 0);
-        }
-        if (cal_times >= XY_CAL_TIMES) break;
-    }
-    adc_cal_data[0] = adc_min_x;
-    adc_cal_data[1] = adc_max_x;
-    adc_cal_data[2] = adc_min_y;
-    adc_cal_data[3] = adc_max_y;
-    adc_cal_data[4] = adc_mid_x;
-    adc_cal_data[5] = adc_mid_y;
-    cal_times       = 0;
-    sensor.setAllCalValue(adc_cal_data);
-    delay(1000);
-    cal_state = CAL_DONE;
+    M5.Display.setTextColor(WHITE, BLACK);       // White text
+    M5.Display.setCursor(0, 120);
+    M5.Display.printf("Push to 4 edges repeatedly");  // Show instruction
+
+    if (cal_times >= XY_CAL_TIMES) break;
+    delay(30);  // 30ms delay
+  }
+
+  uint16_t adc_cal_data[6];
+  adc_cal_data[0] = adc_min_x;    // X minimum
+  adc_cal_data[1] = adc_max_x;    // X maximum
+  adc_cal_data[2] = adc_min_y;    // Y minimum
+  adc_cal_data[3] = adc_max_y;    // Y maximum
+  adc_cal_data[4] = adc_cen_x;    // X center
+  adc_cal_data[5] = adc_cen_y;    // Y center
+
+  joyc.setAllCalValue(adc_cal_data);
+  delay(300);  // Wait for joystick to process
+
+  cal_state = CAL_DONE;
 }
 
-void cal_done(void) {
-    tftSprite.fillSprite(BLACK);
-    tftSprite.setTextSize(1);
-    tftSprite.setCursor(0, 0, 4);
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("CalDone");
-    tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-    tftSprite.setCursor(0, 30, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(GREEN);
+// Display Calibration Complete
+static void cal_done() {
+  drawHeader("CalDone");  // Draw header
 
-    tftSprite.printf("MinX:%d", sensor.getCalValue(0));
-    tftSprite.setCursor(0, 60, 2);
-    tftSprite.printf("MaxX:%d", sensor.getCalValue(1));
-    tftSprite.setCursor(0, 90, 2);
-    tftSprite.printf("MinY:%d", sensor.getCalValue(2));
-    tftSprite.setCursor(0, 120, 2);
-    tftSprite.printf("MaxY:%d", sensor.getCalValue(3));
-    tftSprite.drawLine(5, 165, 130, 165, ORANGE);
-    tftSprite.setCursor(0, 170, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnA:");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Verify");
-    tftSprite.setCursor(0, 200, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnB:");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Recal");
-    tftSprite.pushSprite(0, 0);
+  M5.Display.setTextColor(GREEN, BLACK);  // Green text
+
+  M5.Display.setCursor(0, 40);
+  M5.Display.printf("MinX:%d", joyc.getCalValue(Cal_X_min));  // X min
+  M5.Display.setCursor(0, 65);
+  M5.Display.printf("MaxX:%d", joyc.getCalValue(Cal_X_max));  // X max
+  M5.Display.setCursor(0, 90);
+  M5.Display.printf("MinY:%d", joyc.getCalValue(Cal_Y_min));  // Y min
+  M5.Display.setCursor(0, 115);
+  M5.Display.printf("MaxY:%d", joyc.getCalValue(Cal_Y_max));  // Y max
+
+  M5.Display.drawLine(5, 165, 130, 165, ORANGE);  // Separator line
+
+  M5.Display.setTextColor(WHITE, BLACK);  // White text
+  M5.Display.setCursor(0, 180);
+  M5.Display.printf("BtnA:Verify");         // Button A: Verify
+  M5.Display.setCursor(0, 205);
+  M5.Display.printf("BtnB:ReCalXY");        // Button B: Recalibrate XY
 }
 
-void cal_verify(void) {
-    int8_t pos_x    = sensor.getPOSValue(POS_X, _8bit);
-    int8_t pos_y    = sensor.getPOSValue(POS_Y, _8bit);
-    bool btn_stauts = sensor.getButtonStatus();
-    tftSprite.fillSprite(BLACK);
-    tftSprite.setTextSize(1);
-    tftSprite.setCursor(0, 0, 4);
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Verify");
-    tftSprite.drawLine(5, 30, 130, 30, ORANGE);
-    tftSprite.setCursor(0, 30, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(GREEN);
+// Calibration Verification
+static void cal_verify() {
+  int8_t pos_x = joyc.getPOSValue(POS_X, _8bit);  // X axis position
+  int8_t pos_y = joyc.getPOSValue(POS_Y, _8bit);  // Y axis position
 
-    tftSprite.printf("PosX:%d", pos_x);
-    tftSprite.setCursor(0, 60, 2);
-    tftSprite.printf("PosY:%d", pos_y);
-    tftSprite.drawLine(5, 165, 130, 165, ORANGE);
-    tftSprite.setCursor(0, 170, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnA:");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Next");
-    tftSprite.setCursor(0, 200, 2);
-    tftSprite.setTextSize(2);
-    tftSprite.setTextColor(WHITE);
-    tftSprite.printf("btnB:");
-    tftSprite.setTextColor(YELLOW);
-    tftSprite.printf("Recal");
-    tftSprite.pushSprite(0, 0);
+  drawHeader("Verify");  // Draw header
+
+  M5.Display.setTextColor(GREEN, BLACK);  // Green text
+
+  M5.Display.setCursor(0, 50);
+  M5.Display.printf("PosX:%d", pos_x);  // X position (-128~127)
+  M5.Display.setCursor(0, 80);
+  M5.Display.printf("PosY:%d", pos_y);  // Y position (-128~127)
+
+  M5.Display.drawLine(5, 165, 130, 165, ORANGE);  // Separator line
+
+  M5.Display.setTextColor(WHITE, BLACK);  // White text
+  M5.Display.setCursor(0, 180);
+  M5.Display.printf("BtnA:CalCen");           // Button A: Next
+  M5.Display.setCursor(0, 205);
+  M5.Display.printf("BtnB:seeVal");          // Button B: See Calibration Values
 }
 
-void recal(void) {
-    uint16_t adc_cal_data[6];
-    adc_cal_data[0] = X_DEFAULT_MIN;
-    adc_cal_data[1] = X_DEFAULT_MAX;
-    adc_cal_data[2] = Y_DEFAULT_MIN;
-    adc_cal_data[3] = Y_DEFAULT_MAX;
-    adc_cal_data[4] = MID_DEFAULT;
-    adc_cal_data[5] = MID_DEFAULT;
-    sensor.setAllCalValue(adc_cal_data);
-    delay(1000);
+// Restore Default Calibration Values
+static void recal_defaults() {
+  uint16_t adc_cal_data[6];
+  adc_cal_data[0] = X_DEFAULT_MIN;  // X min default
+  adc_cal_data[1] = X_DEFAULT_MAX;  // X max default
+  adc_cal_data[2] = Y_DEFAULT_MIN;  // Y min default
+  adc_cal_data[3] = Y_DEFAULT_MAX;  // Y max default
+  adc_cal_data[4] = MID_DEFAULT;    // X center default
+  adc_cal_data[5] = MID_DEFAULT;    // Y center default
+  
+  joyc.setAllCalValue(adc_cal_data);
+  delay(300);
 }
 
 void setup() {
-    M5.begin();
+  M5.begin();  
+  waitMiniJoyCReady();// Wait for MiniJoyC to be ready
 
-    while (!(sensor.begin(&Wire, JoyC_ADDR, 0, 26, 100000UL))) {
-        delay(100);
-        Serial.println("I2C Error!\r\n");
-    }
+  M5.Display.setRotation(0);
+  M5.Display.setFont(&fonts::FreeMonoBold9pt7b);
 
-    timer = timerBegin(0, 80, true);
-    timerAttachInterrupt(timer, &onTimer, true);
-    timerAlarmWrite(timer, 1000000 / 5, true);
-    timerAlarmEnable(timer);
-
-    M5.lcd.setRotation(4);  // Rotate the screen. 将屏幕旋转
-    tftSprite.createSprite(
-        135, 240);  // Create a 240x135 canvas. 创建一块160x80的画布
-    // cal_center();
+  cal_state = CAL_VERIFY;
 }
 
 void loop() {
-    M5.update();
-    if (M5.BtnA.wasPressed()) {
-        if (cal_state == CAL_CENTER_DONE) {
-            cal_state = CAL_XY;
-        } else if (cal_state == CAL_DONE) {
-            cal_state = CAL_VERIFY;
-        } else if (cal_state == CAL_VERIFY) {
-            cal_state = CAL_CENTER;
-        }
-    } else if (M5.BtnB.wasPressed()) {
-        if (cal_state == CAL_CENTER_DONE) {
-            cal_state = CAL_CENTER;
-        } else if (cal_state == CAL_DONE) {
-            cal_state = CAL_XY;
-        } else if (cal_state == CAL_VERIFY) {
-            recal();
-            cal_state = CAL_CENTER;
-        }
-    }
-    if (flag_lcd_interval % 5 == 0) {
-        M5.Lcd.drawBitmap(115, 5, 20, 20,
-                          (uint16_t *)gImage_statusLed + (20 * 20 * 0));
-    } else {
-        switch (cal_state) {
-            case CAL_CENTER:
-                cal_center();
-                break;
-            case CAL_CENTER_DONE:
-                cal_center_done();
-                break;
-            case CAL_XY:
-                cal_xy();
-                break;
-            case CAL_DONE:
-                cal_done();
-                break;
-            case CAL_VERIFY:
-                cal_verify();
-                break;
+  M5.update();  // Update M5 input status
 
-            default:
-                break;
-        }
+  // Button A advances calibration flow
+  if (M5.BtnA.wasPressed()) {
+    if (cal_state == CAL_CENTER_DONE) 
+      cal_state = CAL_XY_RANGE;        // Go to XY calibration
+    else if (cal_state == CAL_DONE) 
+      cal_state = CAL_VERIFY;    // Go to verification
+    else if (cal_state == CAL_VERIFY) 
+      cal_state = CAL_CENTER;    // Return to center calibration
+  } 
+  // Button B goes back or performs special operations
+  else if (M5.BtnB.wasPressed()) {
+    if (cal_state == CAL_CENTER_DONE) 
+      cal_state = CAL_CENTER;    // Restart center calibration
+    else if (cal_state == CAL_DONE) 
+      cal_state = CAL_XY_RANGE;        // Return to XY calibration
+    else if (cal_state == CAL_VERIFY) {
+      cal_state = CAL_DONE;    // Return to center calibration
     }
+  }
+
+  if (!joyc.getButtonStatus())  { // MiniJoyC button pressed
+    recal_defaults();          // Restore defaults
+    cal_state = CAL_VERIFY;    // Return to center calibration
+  }
+
+  // Execute corresponding function based on state
+  switch (cal_state) {
+    case CAL_CENTER:      
+      cal_center();                      // Perform center calibration
+      break;
+    case CAL_CENTER_DONE: 
+      cal_center_done();
+      joyc.setLEDColor(0xFFFF00);  // Yellow LED
+      delay(50);
+      break;
+    case CAL_XY_RANGE:          
+      cal_xy_range();                    // Perform XY range calibration
+      joyc.setLEDColor(0x0000FF);  // BLUE LED
+      break;
+    case CAL_DONE:        
+      cal_done();
+      joyc.setLEDColor(0x00FF00);  // GREEN LED
+      delay(80);
+      break;
+    case CAL_VERIFY:      
+      cal_verify();
+      joyc.setLEDColor(0xFFFFFF);  // GREEN LED
+      delay(30);
+      break;
+    default:              
+      cal_state = CAL_VERIFY;            // Reset on invalid state
+      break;
+  }
 }

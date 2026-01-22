@@ -1,6 +1,6 @@
-#include "UNIT_MiniJoyC.h"
+#include "M5HatMiniJoyC.h"
 
-void UNIT_JOYC::writeBytes(uint8_t addr, uint8_t reg, uint8_t *buffer,
+void M5HatMiniJoyC::writeBytes(uint8_t addr, uint8_t reg, uint8_t *buffer,
                            uint8_t length) {
     _wire->beginTransmission(addr);
     _wire->write(reg);
@@ -10,7 +10,7 @@ void UNIT_JOYC::writeBytes(uint8_t addr, uint8_t reg, uint8_t *buffer,
     _wire->endTransmission();
 }
 
-void UNIT_JOYC::readBytes(uint8_t addr, uint8_t reg, uint8_t *buffer,
+void M5HatMiniJoyC::readBytes(uint8_t addr, uint8_t reg, uint8_t *buffer,
                           uint8_t length) {
     uint8_t index = 0;
     _wire->beginTransmission(addr);
@@ -22,7 +22,7 @@ void UNIT_JOYC::readBytes(uint8_t addr, uint8_t reg, uint8_t *buffer,
     }
 }
 
-bool UNIT_JOYC::begin(TwoWire *wire, uint8_t addr, uint8_t sda, uint8_t scl,
+bool M5HatMiniJoyC::begin(TwoWire *wire, uint8_t addr, uint8_t sda, uint8_t scl,
                       uint32_t speed) {
     _wire  = wire;
     _addr  = addr;
@@ -40,7 +40,7 @@ bool UNIT_JOYC::begin(TwoWire *wire, uint8_t addr, uint8_t sda, uint8_t scl,
     }
 }
 
-uint16_t UNIT_JOYC::getADCValue(uint8_t index) {
+uint16_t M5HatMiniJoyC::getADCValue(minijoyc_adc_index_t index) {
     uint8_t data[4];
     if (index > 2) return 0;
     uint8_t reg = index * 2 + ADC_VALUE_REG;
@@ -49,7 +49,7 @@ uint16_t UNIT_JOYC::getADCValue(uint8_t index) {
     return value;
 }
 
-uint16_t UNIT_JOYC::getPOSValue(uint8_t index, minijoyc_pos_read_mode_t bit) {
+uint16_t M5HatMiniJoyC::getPOSValue(minijoyc_pos_index_t index, minijoyc_pos_read_mode_t bit) {
     uint8_t data[4];
     uint32_t value;
 
@@ -67,21 +67,21 @@ uint16_t UNIT_JOYC::getPOSValue(uint8_t index, minijoyc_pos_read_mode_t bit) {
     return value;
 }
 
-bool UNIT_JOYC::getButtonStatus() {
+bool M5HatMiniJoyC::getButtonStatus() {
     uint8_t data;
     readBytes(_addr, BUTTON_REG, &data, 1);
     return data;
 }
 
-void UNIT_JOYC::setLEDColor(uint8_t index, uint32_t color) {
+void M5HatMiniJoyC::setLEDColor(uint32_t rgb888color) {
     uint8_t data[4];
-    data[2] = color & 0xff;
-    data[1] = (color >> 8) & 0xff;
-    data[0] = (color >> 16) & 0xff;
+    data[2] = rgb888color & 0xff;
+    data[1] = (rgb888color >> 8) & 0xff;
+    data[0] = (rgb888color >> 16) & 0xff;
     writeBytes(_addr, RGB_LED_REG, data, 3);
 }
 
-void UNIT_JOYC::setOneCalValue(uint8_t index, uint16_t data) {
+void M5HatMiniJoyC::setOneCalValue(minijoyc_cal_index_t index, uint16_t data) {
     uint8_t reg;
     uint8_t buf[4];
 
@@ -92,12 +92,12 @@ void UNIT_JOYC::setOneCalValue(uint8_t index, uint16_t data) {
     delay(1000);
 }
 
-void UNIT_JOYC::setAllCalValue(uint16_t *data) {
+void M5HatMiniJoyC::setAllCalValue(uint16_t *data) {
     writeBytes(_addr, CAL_REG, (uint8_t *)data, 12);
     delay(1000);
 }
 
-uint16_t UNIT_JOYC::getCalValue(uint8_t index) {
+uint16_t M5HatMiniJoyC::getCalValue(minijoyc_cal_index_t index) {
     if (index > 5) return 0;
     uint8_t data[4];
     uint8_t reg = index * 2 + CAL_REG;
@@ -106,7 +106,7 @@ uint16_t UNIT_JOYC::getCalValue(uint8_t index) {
     return value;
 }
 
-uint8_t UNIT_JOYC::setI2CAddress(uint8_t addr) {
+uint8_t M5HatMiniJoyC::setI2CAddress(uint8_t addr) {
     _wire->beginTransmission(_addr);
     _wire->write(I2C_ADDRESS_REG);
     _wire->write(addr);
@@ -115,7 +115,7 @@ uint8_t UNIT_JOYC::setI2CAddress(uint8_t addr) {
     return _addr;
 }
 
-uint8_t UNIT_JOYC::getI2CAddress(void) {
+uint8_t M5HatMiniJoyC::getI2CAddress(void) {
     _wire->beginTransmission(_addr);
     _wire->write(I2C_ADDRESS_REG);
     _wire->endTransmission();
@@ -127,7 +127,7 @@ uint8_t UNIT_JOYC::getI2CAddress(void) {
     return RegValue;
 }
 
-uint8_t UNIT_JOYC::getFirmwareVersion(void) {
+uint8_t M5HatMiniJoyC::getFirmwareVersion(void) {
     _wire->beginTransmission(_addr);
     _wire->write(FIRMWARE_VERSION_REG);
     _wire->endTransmission();
