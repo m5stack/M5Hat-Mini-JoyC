@@ -1,14 +1,21 @@
-# UNIT MiniJoyC
+# M5Hat-Mini-JoyC
 
 ## Overview
 
-Contains case programs of M5Stack UNIT MiniJoyC.
+### SKU:U156
+
+Arduino library to control M5Stack Hat-MiniJoyC.
+
+## Required Libraries:
+
+- [Hat Mini JoyC](https://docs.m5stack.com/en/hat/MiniJoyC)
+- [M5Unified (optional)](https://github.com/m5stack/M5Unified)
 
 ## Related Link
 
-- [Docment - UNIT MiniJoyC](https://docs.m5stack.com/en/unit/MiniJoyC)
 - [I2C Protocol](https://github.com/m5stack/M5Unit-MiniJoyC/blob/main/docs/MiniJoyC_I2C_Protocol.pdf)
 
 ## License
 
-[MiniJoyC - MIT](LICENSE)
+[M5HatMiniJoyC - MIT](LICENSE)
+
