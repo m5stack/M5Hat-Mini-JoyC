@@ -1,16 +1,17 @@
 {
-  "name": "UNIT_MiniJoyC",
-  "description": "Library for M5Stack UNIT UNIT_MiniJoyC",
-  "keywords": "M5Stack UNIT MiniJoyC",
+  "name": "M5Hat-Mini-JoyC",
+  "description": "M5Stack Library of Hat Mini JoyC",
+  "keywords": "M5Stack, Hat, Mini JoyC, MiniJoyC",
   "authors": {
     "name": "M5Stack",
     "url": "http://www.m5stack.com"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/m5stack/M5Unit-MiniJoyC.git"
+    "url": "https://github.com/m5stack/M5Hat-Mini-JoyC"
   },
   "version": "0.0.1",
   "frameworks": "arduino",
-  "platforms": "espressif32"
+  "platforms": "espressif32",
+  "headers": "M5HatMiniJoyC.h"
 }
